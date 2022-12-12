@@ -4,8 +4,10 @@ import torch.nn as nn
 from collections import defaultdict
 from models.yolo_layer import YOLOLayer
 
+
 def add_conv(in_ch, out_ch, ksize, stride):
     """
+    增加ConvBnAct模块
     Add a conv2d / batchnorm / leaky ReLU block.
     Args:
         in_ch (int): number of input channels of the convolution layer.
@@ -17,6 +19,8 @@ def add_conv(in_ch, out_ch, ksize, stride):
     """
     stage = nn.Sequential()
     pad = (ksize - 1) // 2
+    # H_out = floor((H_in + 2 * Pad - Dilate * (Kernel - 1) - 1) / Stride + 1)
+    #       = floor((H_in + 2 * (Kernel - 1) // 2 - Dilate * (Kernel - 1) - 1) / Stride + 1)
     stage.add_module('conv', nn.Conv2d(in_channels=in_ch,
                                        out_channels=out_ch, kernel_size=ksize, stride=stride,
                                        padding=pad, bias=False))
@@ -27,6 +31,8 @@ def add_conv(in_ch, out_ch, ksize, stride):
 
 class resblock(nn.Module):
     """
+    序列残差块，包含nblocks个ConvBnAct，每个ConvBnAct的输入和输出进行残差连接（基于参数shortcut）
+    注意：ResBlock不改变空间尺寸
     Sequential residual blocks each of which consists of \
     two convolution layers.
     Args:
@@ -34,6 +40,7 @@ class resblock(nn.Module):
         nblocks (int): number of residual blocks.
         shortcut (bool): if True, residual tensor addition is enabled.
     """
+
     def __init__(self, ch, nblocks=1, shortcut=True):
 
         super().__init__()
@@ -41,8 +48,10 @@ class resblock(nn.Module):
         self.module_list = nn.ModuleList()
         for i in range(nblocks):
             resblock_one = nn.ModuleList()
-            resblock_one.append(add_conv(ch, ch//2, 1, 1))
-            resblock_one.append(add_conv(ch//2, ch, 3, 1))
+            # 1x1卷积，通道数减半，不改变空间尺寸
+            resblock_one.append(add_conv(ch, ch // 2, 1, 1))
+            # 3x3卷积，通道数倍增，恢复原始大小，不改变空间尺寸
+            resblock_one.append(add_conv(ch // 2, ch, 3, 1))
             self.module_list.append(resblock_one)
 
     def forward(self, x):
@@ -67,44 +76,158 @@ def create_yolov3_modules(config_model, ignore_thre):
 
     # DarkNet53
     mlist = nn.ModuleList()
+    # ConvBNAct
+    # 输入为3通道，输出为32通道，卷积核大小为3，步长为1
+    # 输入：[N, 3, 608, 608]
+    # 输出：[N, 32, 608, 608]
     mlist.append(add_conv(in_ch=3, out_ch=32, ksize=3, stride=1))
+    # ConvBNAct
+    # 输入为32通道，输出为64通道，卷积核大小为3，步长为2
+    # 输入：[N, 32, 608, 608]
+    # 输出：[N, 64, 304, 304]
     mlist.append(add_conv(in_ch=32, out_ch=64, ksize=3, stride=2))
+    # ResBlock，1*2=2个ConvBnAct
+    # 输入为64通道，输出为64通道
+    # 输入：[N, 64, 304, 304]
+    # 输出：[N, 64, 304, 304]
     mlist.append(resblock(ch=64))
+    # ConvBNAct
+    # 输入为64通道，输出为128通道，卷积核大小为3，步长为2
+    # 输入：[N, 64, 304, 304]
+    # 输出：[N, 128, 152, 152]
     mlist.append(add_conv(in_ch=64, out_ch=128, ksize=3, stride=2))
+    # ResBlock，2*2=4个ConvBnAct
+    # 输入为128通道，输出为128通道
+    # 输入：[N, 128, 152, 152]
+    # 输出：[N, 128, 152, 152]
     mlist.append(resblock(ch=128, nblocks=2))
+    # ConvBNAct
+    # 输入为128通道，输出为256通道，卷积核大小为3，步长为2
+    # 输入：[N, 128, 304, 304]
+    # 输出：[N, 256, 152, 152]
     mlist.append(add_conv(in_ch=128, out_ch=256, ksize=3, stride=2))
-    mlist.append(resblock(ch=256, nblocks=8))    # shortcut 1 from here
+    # ResBlock，8*2=16个ConvBnAct
+    # 输入为256通道，输出为256通道
+    # 输入：[N, 128, 152, 152]
+    # 输出：[N, 128, 152, 152]
+    # 将会和上采样特征数据执行连接操作（基于通道层）
+    mlist.append(resblock(ch=256, nblocks=8))  # shortcut 1 from here
+    # ConvBNAct
+    # 输入为256通道，输出为512通道，卷积核大小为3，步长为2
+    # 输出：[N, 256, 152, 152]
+    # 输出：[N, 512, 76, 76]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=2))
-    mlist.append(resblock(ch=512, nblocks=8))    # shortcut 2 from here
+    # ResBlock，8*2=16个ConvBnAct
+    # 输入为512通道，输出为512通道
+    # 输入：[N, 512, 76, 76]
+    # 输出：[N, 512, 76, 76]
+    mlist.append(resblock(ch=512, nblocks=8))  # shortcut 2 from here
+    # ConvBNAct
+    # 输入为512通道，输出为1024通道，卷积核大小为3，步长为2
+    # 输入：[N, 512, 76, 76]
+    # 输出：[N, 1024, 38, 38]
     mlist.append(add_conv(in_ch=512, out_ch=1024, ksize=3, stride=2))
+    # ResBlock，4*2=8个ConvBnAct
+    # 输入为1024通道，输出为1024通道
+    # 输入：[N, 1024, 38, 38]
+    # 输出：[N, 1024, 38, 38]
     mlist.append(resblock(ch=1024, nblocks=4))
 
     # YOLOv3
+    # ResBlock，2*2=4个ConvBnAct
+    # 输入为1024通道，输出为1024通道，不执行一致性连接
+    # 输入：[N, 1024, 76, 76]
+    # 输出：[N, 1024, 76, 76]
     mlist.append(resblock(ch=1024, nblocks=2, shortcut=False))
+    # ConvBNAct
+    # 输入为1024通道，输出为512通道，卷积核大小为1，步长为1
+    # 输入：[N, 1024, 38, 38]
+    # 输出：[N, 512, 38, 38]
     mlist.append(add_conv(in_ch=1024, out_ch=512, ksize=1, stride=1))
     # 1st yolo branch
+    # 第一个YOLO分支，输入大小为[N, 512, 38, 38]
+    # 首先经过一个ConvBNAct扩充通道到1024，然后输入到YOLO层预测边界框
+    #
+    # ConvBNAct
+    # 输入为512通道，输出为1024通道，卷积核大小为3，步长为1
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 1024, 38, 38]
     mlist.append(add_conv(in_ch=512, out_ch=1024, ksize=3, stride=1))
     mlist.append(
-         YOLOLayer(config_model, layer_no=0, in_ch=1024, ignore_thre=ignore_thre))
+        YOLOLayer(config_model, layer_no=0, in_ch=1024, ignore_thre=ignore_thre))
 
+    # ConvBNAct
+    # 输入为512通道，输出为256通道，卷积核大小为1，步长为1
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 256, 38, 38]
     mlist.append(add_conv(in_ch=512, out_ch=256, ksize=1, stride=1))
+    # 上采样层，使用最近邻算法，扩展倍数为2
+    # 输入：[N, 256, 38, 38]
+    # 输出：[N, 256, 76, 76]
     mlist.append(nn.Upsample(scale_factor=2, mode='nearest'))
+    # 完成上采样操作后，和shortcut 2执行连接操作
+    # [N, 256, 76, 76] + [N, 512, 76, 76] = [N, 768, 76, 76]
+    # ConvBNAct
+    # 输入为768通道，输出为256通道，卷积核大小为1，步长为1
+    # 输入：[N, 768, 76, 76]
+    # 输出：[N, 256, 76, 76]
     mlist.append(add_conv(in_ch=768, out_ch=256, ksize=1, stride=1))
+    # ConvBNAct
+    # 输入为256通道，输出为512通道，卷积核大小为3，步长为1
+    # 输入：[N, 256, 76, 76]
+    # 输出：[N, 512, 76, 76]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=1))
+    # ResBlock，2*1=2个ConvBnAct
+    # 输入为1024通道，输出为1024通道，不执行shortcut
+    # 输入：[N, 512, 76, 76]
+    # 输出：[N, 512, 76, 76]
     mlist.append(resblock(ch=512, nblocks=1, shortcut=False))
+    # ConvBNAct
+    # 输入为512通道，输出为256通道，卷积核大小为1，步长为1
+    # 输入：[N, 512, 76, 76]
+    # 输出：[N, 256, 76, 76]
     mlist.append(add_conv(in_ch=512, out_ch=256, ksize=1, stride=1))
     # 2nd yolo branch
+    # 第二个YOLO分支，输入大小为[N, 256, 76, 76]
+    # 首先经过一个ConvBNAct扩充通道到512，然后输入到YOLO层预测边界框
+    #
+    # ConvBNAct
+    # 输入为256通道，输出为512通道，卷积核大小为3，步长为1
+    # 输入：[N, 256, 76, 76]
+    # 输出：[N, 512, 76, 76]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=1))
     mlist.append(
         YOLOLayer(config_model, layer_no=1, in_ch=512, ignore_thre=ignore_thre))
 
+    # ConvBNAct
+    # 输入为256通道，输出为128通道，卷积核大小为1，步长为1
+    # 输入：[N, 256, 76, 76]
+    # 输出：[N, 128, 76, 76]
     mlist.append(add_conv(in_ch=256, out_ch=128, ksize=1, stride=1))
+    # 上采样层，使用最近邻算法，扩展倍数为2
+    # 输入：[N, 128, 76, 76]
+    # 输出：[N, 128, 152, 152]
     mlist.append(nn.Upsample(scale_factor=2, mode='nearest'))
+    # 完成上采样操作后，和shortcut 1执行连接操作
+    # [N, 128, 152, 152] + [N, 256, 152, 152] = [N, 384, 152, 152]
+    # ConvBNAct
+    # 输入为384通道，输出为128通道，卷积核大小为1，步长为1
+    # 输入：[N, 384, 152, 152]
+    # 输出：[N, 128, 152, 152]
     mlist.append(add_conv(in_ch=384, out_ch=128, ksize=1, stride=1))
+    # ConvBNAct
+    # 输入为128通道，输出为256通道，卷积核大小为3，步长为1
+    # 输入：[N, 128, 152, 152]
+    # 输出：[N, 256, 152, 152]
     mlist.append(add_conv(in_ch=128, out_ch=256, ksize=3, stride=1))
+    # ResBlock，2*2=4个ConvBnAct
+    # 输入为256通道，输出为256通道，不执行shortcut
+    # 输入：[N, 256, 152, 152]
+    # 输出：[N, 256, 152, 152]
     mlist.append(resblock(ch=256, nblocks=2, shortcut=False))
+    # 最后一个YOLO分支
     mlist.append(
-         YOLOLayer(config_model, layer_no=2, in_ch=256, ignore_thre=ignore_thre))
+        YOLOLayer(config_model, layer_no=2, in_ch=256, ignore_thre=ignore_thre))
 
     return mlist
 
@@ -115,6 +238,7 @@ class YOLOv3(nn.Module):
     The network returns loss values from three YOLO layers during training \
     and detection results during test.
     """
+
     def __init__(self, config_model, ignore_thre=0.7):
         """
         Initialization of YOLOv3 class.
@@ -150,9 +274,10 @@ class YOLOv3(nn.Module):
         for i, module in enumerate(self.module_list):
             # yolo layers
             if i in [14, 22, 28]:
+                # 针对各个YOLO层，在训练和测试阶段返回不同结果
                 if train:
                     x, *loss_dict = module(x, targets)
-                    for name, loss in zip(['xy', 'wh', 'conf', 'cls', 'l2'] , loss_dict):
+                    for name, loss in zip(['xy', 'wh', 'conf', 'cls', 'l2'], loss_dict):
                         self.loss_dict[name] += loss
                 else:
                     x = module(x)
@@ -168,11 +293,12 @@ class YOLOv3(nn.Module):
             if i == 22:  # yolo 2nd
                 x = route_layers[3]
             if i == 16:
+                # 执行shortcut 2
                 x = torch.cat((x, route_layers[1]), 1)
             if i == 24:
+                # 执行shortcut 1
                 x = torch.cat((x, route_layers[0]), 1)
         if train:
             return sum(output)
         else:
             return torch.cat(output, 1)
-

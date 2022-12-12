@@ -247,38 +247,59 @@ def preprocess(img, imgsize, jitter, random_placing=False):
             nh, nw (int): shape of the resized image without padding
             dx, dy (int): pad size
     """
+    # 获取图像高/宽
     h, w, _ = img.shape
+    # 通道转换: BGR -> RGB
     img = img[:, :, ::-1]
     assert img is not None
 
     if jitter > 0:
+        # 图像抖动
         # add jitter
+        # 结果宽 = 抖动因子 * 原图像宽
         dw = jitter * w
+        # 结果高 = 抖动因子 * 原图像高
         dh = jitter * h
+        # 宽和高的比率
         new_ar = (w + np.random.uniform(low=-dw, high=dw))\
                  / (h + np.random.uniform(low=-dh, high=dh))
     else:
+        # 宽和高的比率
         new_ar = w / h
 
     if new_ar < 1:
+        # 高比宽大
+        #
+        # 设置高为目标大小
         nh = imgsize
+        # 等比例缩放宽
         nw = nh * new_ar
     else:
+        # 宽大于等于高
+        #
+        # 设置宽为目标大小
         nw = imgsize
+        # 等比例缩放高
         nh = nw / new_ar
     nw, nh = int(nw), int(nh)
 
     if random_placing:
+        # 上／下或者左／右随机位置进行填充
         dx = int(np.random.uniform(imgsize - nw))
         dy = int(np.random.uniform(imgsize - nh))
     else:
+        # 上／下或者左／右等比例填充
         dx = (imgsize - nw) // 2
         dy = (imgsize - nh) // 2
 
+    # 首先将图像缩放到指定大小
     img = cv2.resize(img, (nw, nh))
+    # 设置填充图像，目标大小
     sized = np.ones((imgsize, imgsize, 3), dtype=np.uint8) * 127
+    # 设置ROI区域
     sized[dy:dy+nh, dx:dx+nw, :] = img
 
+    # (原始高，原始宽，缩放后高，缩放后宽，ROI区域左上角x0，ROI区域左上角y0)
     info_img = (h, w, nh, nw, dx, dy)
     return sized, info_img
 

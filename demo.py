@@ -10,15 +10,12 @@ from utils.utils import *
 from utils.parse_yolo_weights import parse_yolo_weights
 
 
-def main():
-    """
-    Visualize the detection result for the given image and the pre-trained model.
-    """
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--cfg', type=str, default='config/yolov3_default.cfg')
     parser.add_argument('--ckpt', type=str,
-                        help='path to the checkpoint file')
+                        help='path to the check point file')
     parser.add_argument('--weights_path', type=str,
                         default=None, help='path to weights file')
     parser.add_argument('--image', type=str)
@@ -27,23 +24,36 @@ def main():
     parser.add_argument('--detect_thresh', type=float,
                         default=None, help='confidence threshold')
     args = parser.parse_args()
+    return args
 
+
+def main():
+    """
+    Visualize the detection result for the given image and the pre-trained model.
+    """
+    args = parse_args()
     with open(args.cfg, 'r') as f:
         cfg = yaml.load(f)
 
+    # 输入图像大小
     imgsize = cfg['TEST']['IMGSIZE']
+    # 创建YOLOv3
     model = YOLOv3(cfg['MODEL'])
 
-    confthre = cfg['TEST']['CONFTHRE'] 
+    confthre = cfg['TEST']['CONFTHRE']
     nmsthre = cfg['TEST']['NMSTHRE']
 
     if args.detect_thresh:
         confthre = args.detect_thresh
 
+    # BGR
     img = cv2.imread(args.image)
+    # [H, W, C] -> [C, H, W]　同时　BGR -> RGB
     img_raw = img.copy()[:, :, ::-1].transpose((2, 0, 1))
     img, info_img = preprocess(img, imgsize, jitter=0)  # info = (h, w, nh, nw, dx, dy)
+    # 图像归一化 + 通道转换（[H, W, C] -> [C, H, W]）
     img = np.transpose(img / 255., (2, 0, 1))
+    # [C, H, W] -> [1, C, H, W]
     img = torch.from_numpy(img).float().unsqueeze(0)
 
     if args.gpu >= 0:
@@ -82,7 +92,6 @@ def main():
     colors = list()
 
     for x1, y1, x2, y2, conf, cls_conf, cls_pred in outputs[0]:
-
         cls_id = coco_class_ids[int(cls_pred)]
         print(int(x1), int(y1), int(x2), int(y2), float(conf), int(cls_pred))
         print('\t+ Label: %s, Conf: %.5f' %

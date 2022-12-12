@@ -6,8 +6,10 @@ from utils.utils import bboxes_iou
 
 class YOLOLayer(nn.Module):
     """
+    YOLO网络的核心，对于输入的特征数据，如何利用锚点框执行预测操作
     detection layer corresponding to yolo_layer.c of darknet
     """
+
     def __init__(self, config_model, layer_no, in_ch, ignore_thre=0.7):
         """
         Args:
@@ -22,15 +24,24 @@ class YOLOLayer(nn.Module):
         """
 
         super(YOLOLayer, self).__init__()
-        strides = [32, 16, 8] # fixed
+        # 特征图相对于
+        strides = [32, 16, 8]  # fixed
+        # 预设的锚点框列表，保存了所有的锚点框长宽
         self.anchors = config_model['ANCHORS']
+        # 指定不同YOLO层使用的锚点框
         self.anch_mask = config_model['ANCH_MASK'][layer_no]
+        # 某一个YOLO层使用的锚点框个数，默认为3
         self.n_anchors = len(self.anch_mask)
+        # 数据集类别数
         self.n_classes = config_model['N_CLASSES']
+        # 阈值
         self.ignore_thre = ignore_thre
+        # 损失函数，work for ???
         self.l2_loss = nn.MSELoss(size_average=False)
         self.bce_loss = nn.BCELoss(size_average=False)
+        # 第N个YOLO层使用的步长，也就是输入图像大小和使用的特征数据之间的缩放比率
         self.stride = strides[layer_no]
+        # 按比例缩放
         self.all_anchors_grid = [(w / self.stride, h / self.stride)
                                  for w, h in self.anchors]
         self.masked_anchors = [self.all_anchors_grid[i]
@@ -141,7 +152,7 @@ class YOLOLayer(nn.Module):
             best_n_all = np.argmax(anchor_ious_all, axis=1)
             best_n = best_n_all % 3
             best_n_mask = ((best_n_all == self.anch_mask[0]) | (
-                best_n_all == self.anch_mask[1]) | (best_n_all == self.anch_mask[2]))
+                    best_n_all == self.anch_mask[1]) | (best_n_all == self.anch_mask[2]))
 
             truth_box[:n, 0] = truth_x_all[b, :n]
             truth_box[:n, 1] = truth_y_all[b, :n]
@@ -164,9 +175,9 @@ class YOLOLayer(nn.Module):
                     obj_mask[b, a, j, i] = 1
                     tgt_mask[b, a, j, i, :] = 1
                     target[b, a, j, i, 0] = truth_x_all[b, ti] - \
-                        truth_x_all[b, ti].to(torch.int16).to(torch.float)
+                                            truth_x_all[b, ti].to(torch.int16).to(torch.float)
                     target[b, a, j, i, 1] = truth_y_all[b, ti] - \
-                        truth_y_all[b, ti].to(torch.int16).to(torch.float)
+                                            truth_y_all[b, ti].to(torch.int16).to(torch.float)
                     target[b, a, j, i, 2] = torch.log(
                         truth_w_all[b, ti] / torch.Tensor(self.masked_anchors)[best_n[ti], 0] + 1e-16)
                     target[b, a, j, i, 3] = torch.log(
@@ -187,7 +198,7 @@ class YOLOLayer(nn.Module):
         target[..., np.r_[0:4, 5:n_ch]] *= tgt_mask
         target[..., 2:4] *= tgt_scale
 
-        bceloss = nn.BCELoss(weight=tgt_scale*tgt_scale,
+        bceloss = nn.BCELoss(weight=tgt_scale * tgt_scale,
                              size_average=False)  # weighted BCEloss
         loss_xy = bceloss(output[..., :2], target[..., :2])
         loss_wh = self.l2_loss(output[..., 2:4], target[..., 2:4]) / 2
