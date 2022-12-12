@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument('--checkpoint_interval', type=int,
                         default=1000, help='interval between saving checkpoints')
     parser.add_argument('--eval_interval', type=int,
-                            default=4000, help='interval between evaluations')
+                        default=4000, help='interval between evaluations')
     parser.add_argument('--checkpoint', type=str,
                         help='pytorch checkpoint file path')
     parser.add_argument('--checkpoint_dir', type=str,
@@ -53,19 +53,30 @@ def main():
 
     # Parse config settings
     with open(args.cfg, 'r') as f:
-        cfg = yaml.load(f)
+        # cfg = yaml.load(f)
+        cfg = yaml.safe_load(f)
 
     print("successfully loaded config file: ", cfg)
 
+    # 动量
     momentum = cfg['TRAIN']['MOMENTUM']
+    # 衰减
     decay = cfg['TRAIN']['DECAY']
+    # warmup迭代次数
     burn_in = cfg['TRAIN']['BURN_IN']
+    # 最大迭代次数
     iter_size = cfg['TRAIN']['MAXITER']
+    # 权重衰减阶段
     steps = eval(cfg['TRAIN']['STEPS'])
+    # 单次训练批量大小
     batch_size = cfg['TRAIN']['BATCHSIZE']
+    # 子批次，累加subdivision次训练后反向传播梯度
     subdivision = cfg['TRAIN']['SUBDIVISION']
+    # 阈值
     ignore_thre = cfg['TRAIN']['IGNORETHRE']
+    # 缩放大小
     random_resize = cfg['AUGMENTATION']['RANDRESIZE']
+    # 初始学习率
     base_lr = cfg['TRAIN']['LR'] / batch_size / subdivision
 
     print('effective_batch_size = batch_size * iter_size = %d * %d' %
@@ -74,6 +85,7 @@ def main():
     # Learning rate setup
     def burnin_schedule(i):
         if i < burn_in:
+            # 在warmup阶段，使用线性学习率进行递增
             factor = pow(i / burn_in, 4)
         elif i < steps[0]:
             factor = 1.0
@@ -98,7 +110,7 @@ def main():
             model.load_state_dict(state)
 
     if cuda:
-        print("using cuda") 
+        print("using cuda")
         model = model.cuda()
 
     if args.tfboard:
@@ -106,36 +118,38 @@ def main():
         from tensorboardX import SummaryWriter
         tblogger = SummaryWriter(args.tfboard)
 
+    # 训练模式
     model.train()
 
     imgsize = cfg['TRAIN']['IMGSIZE']
     dataset = COCODataset(model_type=cfg['MODEL']['TYPE'],
-                  data_dir='COCO/',
-                  img_size=imgsize,
-                  augmentation=cfg['AUGMENTATION'],
-                  debug=args.debug)
+                          data_dir='COCO/',
+                          img_size=imgsize,
+                          augmentation=cfg['AUGMENTATION'],
+                          debug=args.debug)
 
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True, num_workers=args.n_cpu)
     dataiterator = iter(dataloader)
 
     evaluator = COCOAPIEvaluator(model_type=cfg['MODEL']['TYPE'],
-                    data_dir='COCO/',
-                    img_size=cfg['TEST']['IMGSIZE'],
-                    confthre=cfg['TEST']['CONFTHRE'],
-                    nmsthre=cfg['TEST']['NMSTHRE'])
+                                 data_dir='COCO/',
+                                 img_size=cfg['TEST']['IMGSIZE'],
+                                 confthre=cfg['TEST']['CONFTHRE'],
+                                 nmsthre=cfg['TEST']['NMSTHRE'])
 
     dtype = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
     # optimizer setup
     # set weight decay only on conv.weight
+    # 仅针对卷积层权重执行权重衰减
     params_dict = dict(model.named_parameters())
     params = []
     for key, value in params_dict.items():
         if 'conv.weight' in key:
-            params += [{'params':value, 'weight_decay':decay * batch_size * subdivision}]
+            params += [{'params': value, 'weight_decay': decay * batch_size * subdivision}]
         else:
-            params += [{'params':value, 'weight_decay':0.0}]
+            params += [{'params': value, 'weight_decay': 0.0}]
     optimizer = optim.SGD(params, lr=base_lr, momentum=momentum,
                           dampening=0, weight_decay=decay * batch_size * subdivision)
 
@@ -149,6 +163,7 @@ def main():
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, burnin_schedule)
 
     # start training loop
+    # 开始训练
     for iter_i in range(iter_state, iter_size + 1):
 
         # COCO evaluation
@@ -160,6 +175,7 @@ def main():
                 tblogger.add_scalar('val/COCOAP50_95', ap50_95, iter_i)
 
         # subdivision loop
+        # 子批次循环
         optimizer.zero_grad()
         for inner_iter_i in range(subdivision):
             try:
@@ -172,6 +188,7 @@ def main():
             loss = model(imgs, targets)
             loss.backward()
 
+        # 训练完batch_size * subdivision后执行梯度更新
         optimizer.step()
         scheduler.step()
 
@@ -182,7 +199,7 @@ def main():
                   '[Losses: xy %f, wh %f, conf %f, cls %f, total %f, imgsize %d]'
                   % (iter_i, iter_size, current_lr,
                      model.loss_dict['xy'], model.loss_dict['wh'],
-                     model.loss_dict['conf'], model.loss_dict['cls'], 
+                     model.loss_dict['conf'], model.loss_dict['cls'],
                      model.loss_dict['l2'], imgsize),
                   flush=True)
 
@@ -204,7 +221,7 @@ def main():
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         },
-                        os.path.join(args.checkpoint_dir, "snapshot"+str(iter_i)+".ckpt"))
+                       os.path.join(args.checkpoint_dir, "snapshot" + str(iter_i) + ".ckpt"))
     if args.tfboard:
         tblogger.close()
 
