@@ -41,14 +41,16 @@ class YOLOLayer(nn.Module):
         self.bce_loss = nn.BCELoss(size_average=False)
         # 第N个YOLO层使用的步长，也就是输入图像大小和使用的特征数据之间的缩放比率
         self.stride = strides[layer_no]
-        # 按比例缩放
+        # 按比例缩放锚点框长／宽
         self.all_anchors_grid = [(w / self.stride, h / self.stride)
                                  for w, h in self.anchors]
+        # 采集指定YOLO使用的锚点
         self.masked_anchors = [self.all_anchors_grid[i]
                                for i in self.anch_mask]
         self.ref_anchors = np.zeros((len(self.all_anchors_grid), 4))
         self.ref_anchors[:, 2:] = np.array(self.all_anchors_grid)
         self.ref_anchors = torch.FloatTensor(self.ref_anchors)
+        # 1x1卷积操作，计算特征图中每个网格的预测框（锚点框数量*(类别数+4(xywh)+1(置信度))）
         self.conv = nn.Conv2d(in_channels=in_ch,
                               out_channels=self.n_anchors * (self.n_classes + 5),
                               kernel_size=1, stride=1, padding=0)
@@ -77,41 +79,62 @@ class YOLOLayer(nn.Module):
         """
         output = self.conv(xin)
 
+        # 批量大小
         batchsize = output.shape[0]
+        # 特征图空间尺寸
         fsize = output.shape[2]
+        # 输出通道数
+        # n_ch = 4(xywh) + 1(conf) + n_classes
         n_ch = 5 + self.n_classes
         dtype = torch.cuda.FloatTensor if xin.is_cuda else torch.FloatTensor
 
+        # [B, C_out, F_H, F_W] -> [B, n_anchors, n_ch, F_H, F_W]
+        # C_out = n_anchors * (5 + n_classes)
         output = output.view(batchsize, self.n_anchors, n_ch, fsize, fsize)
+        # [B, n_anchors, n_ch, F_H, F_W] -> [B, n_anchors, F_H, F_W, n_ch]
         output = output.permute(0, 1, 3, 4, 2)  # .contiguous()
 
         # logistic activation for xy, obj, cls
-        output[..., np.r_[:2, 4:n_ch]] = torch.sigmoid(
-            output[..., np.r_[:2, 4:n_ch]])
+        # 针对预测坐标(xy)和预测分类结果执行sigmoid运算，将数值归一化到(0, 1)之间
+        output[..., np.r_[:2, 4:n_ch]] = torch.sigmoid(output[..., np.r_[:2, 4:n_ch]])
 
         # calculate pred - xywh obj cls
+        # 网格坐标
+        # [0, 1, 2, ..., F_W - 1] -> [B, n_anchors, F_H, F_W]
+        x_shift = dtype(np.broadcast_to(np.arange(fsize, dtype=np.float32), output.shape[:4]))
+        # [0, 1, 2, ..., F_H - 1] -> [F_H, 1] -> [B, n_anchors, F_H, F_W]
+        y_shift = dtype(np.broadcast_to(np.arange(fsize, dtype=np.float32).reshape(fsize, 1), output.shape[:4]))
 
-        x_shift = dtype(np.broadcast_to(
-            np.arange(fsize, dtype=np.float32), output.shape[:4]))
-        y_shift = dtype(np.broadcast_to(
-            np.arange(fsize, dtype=np.float32).reshape(fsize, 1), output.shape[:4]))
-
+        # [n_anchors, 2]
         masked_anchors = np.array(self.masked_anchors)
 
+        # [n_anchors] -> [1, n_anchors, 1, 1] -> [B, n_anchors, F_H, F_W]
         w_anchors = dtype(np.broadcast_to(np.reshape(
             masked_anchors[:, 0], (1, self.n_anchors, 1, 1)), output.shape[:4]))
+        # [n_anchors] -> [1, n_anchors, 1, 1] -> [B, n_anchors, F_H, F_W]
         h_anchors = dtype(np.broadcast_to(np.reshape(
             masked_anchors[:, 1], (1, self.n_anchors, 1, 1)), output.shape[:4]))
 
         pred = output.clone()
+        # 预测框坐标x0加上每个网格的左上角坐标x
+        # b_x = sigmoid(t_x) + c_x
         pred[..., 0] += x_shift
+        # 预测框坐标y0加上每个网格的左上角坐标y
+        # b_y = sigmoid(t_y) + c_y
         pred[..., 1] += y_shift
+        # 计算预测框长/宽的实际长度
+        # b_w = exp(t_w) * p_w
         pred[..., 2] = torch.exp(pred[..., 2]) * w_anchors
+        # b_h = exp(t_h) * p_h
         pred[..., 3] = torch.exp(pred[..., 3]) * h_anchors
 
         if labels is None:  # not training
+            # 推理阶段，不计算损失
+            # 将预测框坐标按比例返回到原图大小
             pred[..., :4] *= self.stride
-            return pred.view(batchsize, -1, n_ch).data
+            # [B, n_anchors, F_H, F_W, n_ch] -> [B, n_anchors * F_H * F_W, n_ch]
+            # return pred.view(batchsize, -1, n_ch).data
+            return pred.reshape(batchsize, -1, n_ch).data
 
         pred = pred[..., :4].data
 

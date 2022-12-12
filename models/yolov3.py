@@ -103,129 +103,132 @@ def create_yolov3_modules(config_model, ignore_thre):
     mlist.append(resblock(ch=128, nblocks=2))
     # ConvBNAct
     # 输入为128通道，输出为256通道，卷积核大小为3，步长为2
-    # 输入：[N, 128, 304, 304]
-    # 输出：[N, 256, 152, 152]
+    # 输入：[N, 128, 152, 152]
+    # 输出：[N, 256, 76, 76]
     mlist.append(add_conv(in_ch=128, out_ch=256, ksize=3, stride=2))
     # ResBlock，8*2=16个ConvBnAct
     # 输入为256通道，输出为256通道
-    # 输入：[N, 128, 152, 152]
-    # 输出：[N, 128, 152, 152]
+    # 输入：[N, 128, 76, 76]
+    # 输出：[N, 128, 76, 76]
     # 将会和上采样特征数据执行连接操作（基于通道层）
     mlist.append(resblock(ch=256, nblocks=8))  # shortcut 1 from here
     # ConvBNAct
     # 输入为256通道，输出为512通道，卷积核大小为3，步长为2
-    # 输出：[N, 256, 152, 152]
-    # 输出：[N, 512, 76, 76]
+    # 输出：[N, 256, 76, 76]
+    # 输出：[N, 512, 38, 38]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=2))
     # ResBlock，8*2=16个ConvBnAct
     # 输入为512通道，输出为512通道
-    # 输入：[N, 512, 76, 76]
-    # 输出：[N, 512, 76, 76]
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 512, 38, 38]
     mlist.append(resblock(ch=512, nblocks=8))  # shortcut 2 from here
     # ConvBNAct
     # 输入为512通道，输出为1024通道，卷积核大小为3，步长为2
-    # 输入：[N, 512, 76, 76]
-    # 输出：[N, 1024, 38, 38]
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 1024, 19, 19]
     mlist.append(add_conv(in_ch=512, out_ch=1024, ksize=3, stride=2))
     # ResBlock，4*2=8个ConvBnAct
     # 输入为1024通道，输出为1024通道
-    # 输入：[N, 1024, 38, 38]
-    # 输出：[N, 1024, 38, 38]
+    # 输入：[N, 1024, 19, 19]
+    # 输出：[N, 1024, 19, 19]
     mlist.append(resblock(ch=1024, nblocks=4))
 
     # YOLOv3
     # ResBlock，2*2=4个ConvBnAct
     # 输入为1024通道，输出为1024通道，不执行一致性连接
-    # 输入：[N, 1024, 76, 76]
-    # 输出：[N, 1024, 76, 76]
+    # 输入：[N, 1024, 19, 19]
+    # 输出：[N, 1024, 19, 19]
     mlist.append(resblock(ch=1024, nblocks=2, shortcut=False))
     # ConvBNAct
     # 输入为1024通道，输出为512通道，卷积核大小为1，步长为1
-    # 输入：[N, 1024, 38, 38]
-    # 输出：[N, 512, 38, 38]
+    # 输入：[N, 1024, 19, 19]
+    # 输出：[N, 512, 19, 19]
     mlist.append(add_conv(in_ch=1024, out_ch=512, ksize=1, stride=1))
     # 1st yolo branch
-    # 第一个YOLO分支，输入大小为[N, 512, 38, 38]
+    # 第一个YOLO分支，输入大小为[N, 512, 19, 19]
     # 首先经过一个ConvBNAct扩充通道到1024，然后输入到YOLO层预测边界框
+    # 特征数据的空间尺寸与原始数据的空间尺寸的比率为 608 / 19 = 32
     #
     # ConvBNAct
     # 输入为512通道，输出为1024通道，卷积核大小为3，步长为1
-    # 输入：[N, 512, 38, 38]
-    # 输出：[N, 1024, 38, 38]
+    # 输入：[N, 512, 19, 19]
+    # 输出：[N, 1024, 19, 19]
     mlist.append(add_conv(in_ch=512, out_ch=1024, ksize=3, stride=1))
     mlist.append(
         YOLOLayer(config_model, layer_no=0, in_ch=1024, ignore_thre=ignore_thre))
 
     # ConvBNAct
     # 输入为512通道，输出为256通道，卷积核大小为1，步长为1
-    # 输入：[N, 512, 38, 38]
-    # 输出：[N, 256, 38, 38]
+    # 输入：[N, 512, 19, 19]
+    # 输出：[N, 256, 19, 19]
     mlist.append(add_conv(in_ch=512, out_ch=256, ksize=1, stride=1))
     # 上采样层，使用最近邻算法，扩展倍数为2
-    # 输入：[N, 256, 38, 38]
-    # 输出：[N, 256, 76, 76]
+    # 输入：[N, 256, 19, 19]
+    # 输出：[N, 256, 38, 38]
     mlist.append(nn.Upsample(scale_factor=2, mode='nearest'))
     # 完成上采样操作后，和shortcut 2执行连接操作
-    # [N, 256, 76, 76] + [N, 512, 76, 76] = [N, 768, 76, 76]
+    # [N, 256, 38, 38] + [N, 512, 38, 38] = [N, 768, 38, 38]
     # ConvBNAct
     # 输入为768通道，输出为256通道，卷积核大小为1，步长为1
-    # 输入：[N, 768, 76, 76]
-    # 输出：[N, 256, 76, 76]
+    # 输入：[N, 768, 38, 38]
+    # 输出：[N, 256, 38, 38]
     mlist.append(add_conv(in_ch=768, out_ch=256, ksize=1, stride=1))
     # ConvBNAct
     # 输入为256通道，输出为512通道，卷积核大小为3，步长为1
-    # 输入：[N, 256, 76, 76]
-    # 输出：[N, 512, 76, 76]
+    # 输入：[N, 256, 38, 38]
+    # 输出：[N, 512, 38, 38]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=1))
     # ResBlock，2*1=2个ConvBnAct
     # 输入为1024通道，输出为1024通道，不执行shortcut
-    # 输入：[N, 512, 76, 76]
-    # 输出：[N, 512, 76, 76]
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 512, 38, 38]
     mlist.append(resblock(ch=512, nblocks=1, shortcut=False))
     # ConvBNAct
     # 输入为512通道，输出为256通道，卷积核大小为1，步长为1
-    # 输入：[N, 512, 76, 76]
-    # 输出：[N, 256, 76, 76]
+    # 输入：[N, 512, 38, 38]
+    # 输出：[N, 256, 38, 38]
     mlist.append(add_conv(in_ch=512, out_ch=256, ksize=1, stride=1))
     # 2nd yolo branch
-    # 第二个YOLO分支，输入大小为[N, 256, 76, 76]
+    # 第二个YOLO分支，输入大小为[N, 256, 38, 38]
     # 首先经过一个ConvBNAct扩充通道到512，然后输入到YOLO层预测边界框
+    # 特征数据的空间尺寸与原始数据的空间尺寸的比率为608 / 38 = 16
     #
     # ConvBNAct
     # 输入为256通道，输出为512通道，卷积核大小为3，步长为1
-    # 输入：[N, 256, 76, 76]
-    # 输出：[N, 512, 76, 76]
+    # 输入：[N, 256, 38, 38]
+    # 输出：[N, 512, 38, 38]
     mlist.append(add_conv(in_ch=256, out_ch=512, ksize=3, stride=1))
     mlist.append(
         YOLOLayer(config_model, layer_no=1, in_ch=512, ignore_thre=ignore_thre))
 
     # ConvBNAct
     # 输入为256通道，输出为128通道，卷积核大小为1，步长为1
-    # 输入：[N, 256, 76, 76]
-    # 输出：[N, 128, 76, 76]
+    # 输入：[N, 256, 38, 38]
+    # 输出：[N, 128, 38, 38]
     mlist.append(add_conv(in_ch=256, out_ch=128, ksize=1, stride=1))
     # 上采样层，使用最近邻算法，扩展倍数为2
-    # 输入：[N, 128, 76, 76]
-    # 输出：[N, 128, 152, 152]
+    # 输入：[N, 128, 38, 38]
+    # 输出：[N, 128, 76, 76]
     mlist.append(nn.Upsample(scale_factor=2, mode='nearest'))
     # 完成上采样操作后，和shortcut 1执行连接操作
-    # [N, 128, 152, 152] + [N, 256, 152, 152] = [N, 384, 152, 152]
+    # [N, 128, 76, 76] + [N, 256, 76, 76] = [N, 384, 76, 76]
     # ConvBNAct
     # 输入为384通道，输出为128通道，卷积核大小为1，步长为1
-    # 输入：[N, 384, 152, 152]
-    # 输出：[N, 128, 152, 152]
+    # 输入：[N, 384, 76, 76]
+    # 输出：[N, 128, 76, 76]
     mlist.append(add_conv(in_ch=384, out_ch=128, ksize=1, stride=1))
     # ConvBNAct
     # 输入为128通道，输出为256通道，卷积核大小为3，步长为1
-    # 输入：[N, 128, 152, 152]
-    # 输出：[N, 256, 152, 152]
+    # 输入：[N, 128, 76, 76]
+    # 输出：[N, 256, 76, 76]
     mlist.append(add_conv(in_ch=128, out_ch=256, ksize=3, stride=1))
     # ResBlock，2*2=4个ConvBnAct
     # 输入为256通道，输出为256通道，不执行shortcut
-    # 输入：[N, 256, 152, 152]
-    # 输出：[N, 256, 152, 152]
+    # 输入：[N, 256, 76, 76]
+    # 输出：[N, 256, 76, 76]
     mlist.append(resblock(ch=256, nblocks=2, shortcut=False))
     # 最后一个YOLO分支
+    # 特征数据的空间尺寸与原始数据的空间尺寸的比率为608 / 76 = 8
     mlist.append(
         YOLOLayer(config_model, layer_no=2, in_ch=256, ignore_thre=ignore_thre))
 
@@ -289,6 +292,7 @@ class YOLOv3(nn.Module):
             if i in [6, 8, 12, 20]:
                 route_layers.append(x)
             if i == 14:
+                # 第一个YOLO层分支，不参与主线特征计算
                 x = route_layers[2]
             if i == 22:  # yolo 2nd
                 x = route_layers[3]

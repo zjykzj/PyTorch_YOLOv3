@@ -98,10 +98,10 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45):
         ind = (image_pred[:, 5:] * image_pred[:, 4][:, None] >= conf_thre).nonzero()
         # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
         detections = torch.cat((
-                image_pred[ind[:, 0], :5],
-                image_pred[ind[:, 0], 5 + ind[:, 1]].unsqueeze(1),
-                ind[:, 1].float().unsqueeze(1)
-                ), 1)
+            image_pred[ind[:, 0], :5],
+            image_pred[ind[:, 0], 5 + ind[:, 1]].unsqueeze(1),
+            ind[:, 1].float().unsqueeze(1)
+        ), 1)
         # Iterate through all predicted classes
         unique_labels = detections[:, -1].cpu().unique()
         if prediction.is_cuda:
@@ -111,7 +111,7 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45):
             detections_class = detections[detections[:, -1] == c]
             nms_in = detections_class.cpu().numpy()
             nms_out_index = nms(
-                nms_in[:, :4], nms_thre, score=nms_in[:, 4]*nms_in[:, 5])
+                nms_in[:, :4], nms_thre, score=nms_in[:, 4] * nms_in[:, 5])
             detections_class = detections_class[nms_out_index]
             if output[i] is None:
                 output[i] = detections_class
@@ -154,10 +154,10 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
         area_b = torch.prod(bboxes_b[:, 2:] - bboxes_b[:, :2], 1)
     else:
         tl = torch.max((bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
-                        (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2))
+                       (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2))
         # bottom right
         br = torch.min((bboxes_a[:, None, :2] + bboxes_a[:, None, 2:] / 2),
-                        (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2))
+                       (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2))
 
         area_a = torch.prod(bboxes_a[:, 2:], 1)
         area_b = torch.prod(bboxes_b[:, 2:], 1)
@@ -261,7 +261,7 @@ def preprocess(img, imgsize, jitter, random_placing=False):
         # 结果高 = 抖动因子 * 原图像高
         dh = jitter * h
         # 宽和高的比率
-        new_ar = (w + np.random.uniform(low=-dw, high=dw))\
+        new_ar = (w + np.random.uniform(low=-dw, high=dw)) \
                  / (h + np.random.uniform(low=-dh, high=dh))
     else:
         # 宽和高的比率
@@ -297,11 +297,12 @@ def preprocess(img, imgsize, jitter, random_placing=False):
     # 设置填充图像，目标大小
     sized = np.ones((imgsize, imgsize, 3), dtype=np.uint8) * 127
     # 设置ROI区域
-    sized[dy:dy+nh, dx:dx+nw, :] = img
+    sized[dy:dy + nh, dx:dx + nw, :] = img
 
     # (原始高，原始宽，缩放后高，缩放后宽，ROI区域左上角x0，ROI区域左上角y0)
     info_img = (h, w, nh, nw, dx, dy)
     return sized, info_img
+
 
 def rand_scale(s):
     """
@@ -316,6 +317,7 @@ def rand_scale(s):
     if np.random.rand() > 0.5:
         return scale
     return 1 / scale
+
 
 def random_distort(img, hue, saturation, exposure):
     """
