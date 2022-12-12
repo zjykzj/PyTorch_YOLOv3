@@ -181,12 +181,15 @@ class YOLOLayer(nn.Module):
             truth_box[:n, 1] = truth_y_all[b, :n]
 
             pred_ious = bboxes_iou(
-                pred[b].view(-1, 4), truth_box, xyxy=False)
+                pred[b].reshape(-1, 4), truth_box, xyxy=False)
+                # pred[b].view(-1, 4), truth_box, xyxy=False)
             pred_best_iou, _ = pred_ious.max(dim=1)
             pred_best_iou = (pred_best_iou > self.ignore_thre)
             pred_best_iou = pred_best_iou.view(pred[b].shape[:3])
             # set mask to zero (ignore) if pred matches truth
-            obj_mask[b] = 1 - pred_best_iou
+            # RuntimeError: Subtraction, the `-` operator, with a bool tensor is not supported. If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.
+            # obj_mask[b] = 1 - pred_best_iou
+            obj_mask[b] = ~pred_best_iou
 
             if sum(best_n_mask) == 0:
                 continue
