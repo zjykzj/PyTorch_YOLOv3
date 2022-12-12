@@ -13,6 +13,7 @@ class COCODataset(Dataset):
     """
     COCO dataset class.
     """
+
     def __init__(self, model_type, data_dir='COCO', json_file='instances_train2017.json',
                  name='train2017', img_size=416,
                  augmentation=None, min_size=1, debug=False):
@@ -27,10 +28,15 @@ class COCODataset(Dataset):
             min_size (int): bounding boxes smaller than this are ignored
             debug (bool): if True, only one data id is selected from the dataset
         """
+        # 数据集根路径
         self.data_dir = data_dir
+        # 标注文件
         self.json_file = json_file
+        # 模型类型，是否是YOLO
         self.model_type = model_type
-        self.coco = COCO(self.data_dir+'annotations/'+self.json_file)
+        # 初始化COCO数据类
+        self.coco = COCO(self.data_dir + 'annotations/' + self.json_file)
+        # 获取图片ID
         self.ids = self.coco.getImgIds()
         if debug:
             self.ids = self.ids[1:2]
@@ -38,16 +44,20 @@ class COCODataset(Dataset):
         self.class_ids = sorted(self.coco.getCatIds())
         self.name = name
         self.max_labels = 50
+        # 输入数据大小
         self.img_size = img_size
+        # 忽略小于min_size的边界框
         self.min_size = min_size
+        # 左右翻转
         self.lrflip = augmentation['LRFLIP']
+        # 空间抖动
         self.jitter = augmentation['JITTER']
         self.random_placing = augmentation['RANDOM_PLACING']
+        # 颜色抖动
         self.hue = augmentation['HUE']
         self.saturation = augmentation['SATURATION']
         self.exposure = augmentation['EXPOSURE']
         self.random_distort = augmentation['RANDOM_DISTORT']
-
 
     def __len__(self):
         return len(self.ids)
@@ -82,13 +92,13 @@ class COCODataset(Dataset):
             lrflip = True
 
         # load image and preprocess
-        img_file = os.path.join(self.data_dir, self.name,
-                                '{:012}'.format(id_) + '.jpg')
+        # img_file = os.path.join(self.data_dir, self.name,
+        img_file = os.path.join(self.data_dir, "images", self.name, '{:012}'.format(id_) + '.jpg')
         img = cv2.imread(img_file)
 
         if self.json_file == 'instances_val5k.json' and img is None:
-            img_file = os.path.join(self.data_dir, 'train2017',
-                                    '{:012}'.format(id_) + '.jpg')
+            # img_file = os.path.join(self.data_dir, 'train2017', '{:012}'.format(id_) + '.jpg')
+            img_file = os.path.join(self.data_dir, "images", 'train2017', '{:012}'.format(id_) + '.jpg')
             img = cv2.imread(img_file)
         assert img is not None
 
@@ -117,7 +127,7 @@ class COCODataset(Dataset):
             if 'YOLO' in self.model_type:
                 labels = label2yolobox(labels, info_img, self.img_size, lrflip)
             padded_labels[range(len(labels))[:self.max_labels]
-                          ] = labels[:self.max_labels]
+            ] = labels[:self.max_labels]
         padded_labels = torch.from_numpy(padded_labels)
 
         return img, padded_labels, info_img, id_
