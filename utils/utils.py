@@ -29,22 +29,33 @@ def nms(bbox, thresh, score=None, limit=None):
         return np.zeros((0,), dtype=np.int32)
 
     if score is not None:
+        # 按照置信度大小进行排序
         order = score.argsort()[::-1]
         bbox = bbox[order]
+    # 计算预测框面积
+    # bbox[:, 2:] - bbox[:, :2]:
+    #   (x2 - x1)/(y2 - y1)
+    # bbox_area: [N_bbox]
     bbox_area = np.prod(bbox[:, 2:] - bbox[:, :2], axis=1)
 
     selec = np.zeros(bbox.shape[0], dtype=bool)
     for i, b in enumerate(bbox):
+        # 计算每个预测框与其他预测框的IoU
+        # 首先计算交集面积，
+        # top-left: [2(top, left)]
         tl = np.maximum(b[:2], bbox[selec, :2])
+        # bottom-right: [2(bottom, right)]
         br = np.minimum(b[2:], bbox[selec, 2:])
         area = np.prod(br - tl, axis=1) * (tl < br).all(axis=1)
 
         iou = area / (bbox_area[i] + bbox_area[selec] - area)
         if (iou >= thresh).any():
+            # 如果iou大于阈值，说明该预测框与前面已确认的预测框高度重叠，需要舍弃
             continue
 
         selec[i] = True
         if limit is not None and np.count_nonzero(selec) >= limit:
+            # 是否对每一个类别的预测框数目进行约束
             break
 
     selec = np.where(selec)[0]
@@ -76,40 +87,72 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45):
         output (list of torch tensor):
 
     """
+    # 输入prediction: [B, N_bbox, 4+1+80]
     box_corner = prediction.new(prediction.shape)
+    # 计算左上角坐标x0 = x_c - w/2
     box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+    # 计算左上角坐标y0 = y_c - h/2
     box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+    # 计算右下角坐标x1 = x_c + w/2
     box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+    # 计算右下角坐标y1 = y_c + h/2
     box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
     prediction[:, :, :4] = box_corner[:, :, :4]
 
     output = [None for _ in range(len(prediction))]
     for i, image_pred in enumerate(prediction):
+        # 计算每幅图像的预测结果
         # Filter out confidence scores below threshold
+        # 计算每个预测框对应的最大类别概率
+        # [N_bbox, num_classes] -> ｛分类概率，对应下标｝
         class_pred = torch.max(image_pred[:, 5:5 + num_classes], 1)
+        # [N_bbox]
         class_pred = class_pred[0]
-        conf_mask = (image_pred[:, 4] * class_pred >= conf_thre).squeeze()
+        # 置信度掩码 [N_bbox] -> [N_bbox]
+        # Pr(Class_i | Object) * Pr(Object) = Pr(Class_i)
+        conf_mask = (image_pred[:, 4] * class_pred >= conf_thre)
+        conf_mask = conf_mask.squeeze()
+        # 过滤不符合置信度阈值的预测框
         image_pred = image_pred[conf_mask]
 
         # If none are remaining => process next image
+        # 如果所有预测框都已经舍弃，继续下一张图片的预测框计算
         if not image_pred.size(0):
             continue
         # Get detections with higher confidence scores than the threshold
+        # (image_pred[:, 5:] * image_pred[:, 4][:, None] >= conf_thre)得到一个二维矩阵：[N_bbox, 80]
+        # nonzero()得到一个二维矩阵：[N_nonzero, 2]
+        # N_nonzero表示二维矩阵[N_bbox, 80]中每一行不为0的数目
+        # [N_nonzero, 0]表示行下标
+        # [N_nonzero, 1]表示列下标
         ind = (image_pred[:, 5:] * image_pred[:, 4][:, None] >= conf_thre).nonzero()
         # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+        # 获取预测结果
+        # image_pred[ind[:, 0], :5]: 每个预测框的预测坐标 + 置信度
+        # image_pred[ind[:, 0], 5 + ind[:, 1]].unsqueeze(1): 每个预测框的分类概率
+        # ind[:, 1].float().unsqueeze(1): 每个预测框的分类下标
         detections = torch.cat((
             image_pred[ind[:, 0], :5],
             image_pred[ind[:, 0], 5 + ind[:, 1]].unsqueeze(1),
             ind[:, 1].float().unsqueeze(1)
         ), 1)
         # Iterate through all predicted classes
+        # 统计所有预测框对应的类别列表
         unique_labels = detections[:, -1].cpu().unique()
         if prediction.is_cuda:
             unique_labels = unique_labels.cuda()
         for c in unique_labels:
+            # 计算特定类别的预测框
             # Get the detections with the particular class
+            # 获取特定类别的预测框列表
             detections_class = detections[detections[:, -1] == c]
             nms_in = detections_class.cpu().numpy()
+            # 输入
+            # nms_in[:, :4]: 特定类别的预测框坐标
+            # nms_thre: NMS阈值
+            # nms_in[:, 4] * nms_in[:, 5]:
+            #   Pr(Object) * Pr(Class_i | Object) = Pr(Class_i)
+            #   属于该类别的置信度
             nms_out_index = nms(
                 nms_in[:, :4], nms_thre, score=nms_in[:, 4] * nms_in[:, 5])
             detections_class = detections_class[nms_out_index]

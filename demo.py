@@ -66,6 +66,7 @@ def main():
 
     if args.weights_path:
         print("loading yolo weights %s" % (args.weights_path))
+        # 加载YOLO权重
         parse_yolo_weights(model, args.weights_path)
     elif args.ckpt:
         print("loading checkpoint %s" % (args.ckpt))
@@ -78,7 +79,9 @@ def main():
     model.eval()
 
     with torch.no_grad():
+        # img: [1, 3, 416, 416]
         outputs = model(img)
+        # outputs: [B, N_bbox, 4(xywh)+1(conf)+num_classes]
         outputs = postprocess(outputs, 80, confthre, nmsthre)
 
     if outputs[0] is None:
@@ -91,6 +94,11 @@ def main():
     classes = list()
     colors = list()
 
+    # x1/y1: 左上角坐标
+    # x2/y2: 右下角坐标
+    # conf: 置信度
+    # cls_conf: 分类置信度
+    # cls_pred: 分类下标
     for x1, y1, x2, y2, conf, cls_conf, cls_pred in outputs[0]:
         cls_id = coco_class_ids[int(cls_pred)]
         print(int(x1), int(y1), int(x2), int(y2), float(conf), int(cls_pred))

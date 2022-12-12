@@ -1,4 +1,3 @@
-
 from __future__ import division
 import torch
 import numpy as np
@@ -25,7 +24,7 @@ def parse_conv_block(m, weights, offset, initflag):
     for pname in ['bias', 'weight', 'running_mean', 'running_var']:
         layerparam = getattr(bn_model, pname)
 
-        if initflag: # yolo initialization - scale to one, bias to zero
+        if initflag:  # yolo initialization - scale to one, bias to zero
             if pname == 'weight':
                 weights = np.append(weights, np.ones(param_length))
             else:
@@ -38,7 +37,7 @@ def parse_conv_block(m, weights, offset, initflag):
     param_length = conv_model.weight.numel()
 
     # conv
-    if initflag: # yolo initialization
+    if initflag:  # yolo initialization
         n, c, k, _ = conv_model.weight.shape
         scale = np.sqrt(2 / (k * k * c))
         weights = np.append(weights, scale * np.random.normal(size=param_length))
@@ -49,6 +48,7 @@ def parse_conv_block(m, weights, offset, initflag):
     offset += param_length
 
     return offset, weights
+
 
 def parse_yolo_block(m, weights, offset, initflag):
     """
@@ -66,7 +66,7 @@ def parse_yolo_block(m, weights, offset, initflag):
     conv_model = m._modules['conv']
     param_length = conv_model.bias.numel()
 
-    if initflag: # yolo initialization - bias to zero
+    if initflag:  # yolo initialization - bias to zero
         weights = np.append(weights, np.zeros(param_length))
 
     param = torch.from_numpy(
@@ -76,17 +76,18 @@ def parse_yolo_block(m, weights, offset, initflag):
 
     param_length = conv_model.weight.numel()
 
-    if initflag: # yolo initialization
+    if initflag:  # yolo initialization
         n, c, k, _ = conv_model.weight.shape
         scale = np.sqrt(2 / (k * k * c))
         weights = np.append(weights, scale * np.random.normal(size=param_length))
- 
+
     param = torch.from_numpy(
         weights[offset:offset + param_length]).view_as(conv_model.weight)
     conv_model.weight.data.copy_(param)
     offset += param_length
 
     return offset, weights
+
 
 def parse_yolo_weights(model, weights_path):
     """
@@ -98,13 +99,13 @@ def parse_yolo_weights(model, weights_path):
     fp = open(weights_path, "rb")
 
     # skip the header
-    header = np.fromfile(fp, dtype=np.int32, count=5) # not used
+    header = np.fromfile(fp, dtype=np.int32, count=5)  # not used
     # read weights 
     weights = np.fromfile(fp, dtype=np.float32)
     fp.close()
 
-    offset = 0 
-    initflag = False #whole yolo weights : False, darknet weights : True
+    offset = 0
+    initflag = False  # whole yolo weights : False, darknet weights : True
 
     for m in model.module_list:
 
@@ -122,4 +123,4 @@ def parse_yolo_weights(model, weights_path):
             # YOLO Layer (one conv with bias) Initialization
             offset, weights = parse_yolo_block(m, weights, offset, initflag)
 
-        initflag = (offset >= len(weights)) # the end of the weights file. turn the flag on
+        initflag = (offset >= len(weights))  # the end of the weights file. turn the flag on
