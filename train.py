@@ -79,6 +79,9 @@ def main():
     # 初始学习率
     base_lr = cfg['TRAIN']['LR'] / batch_size / subdivision
 
+    # 关于批量大小，是因为目标检测训练中，从单张图片中采集了大量的真值框参与训练
+    # 所以单次训练的数据量很小，为了更稳定的进行梯度更新，需要累加多次批量运算的梯度（也就是梯度累加）
+    # 所以有效批量大小 = batch_size(单次批量大小) * iter_size(累计批次)
     print('effective_batch_size = batch_size * iter_size = %d * %d' %
           (batch_size, subdivision))
 
@@ -185,7 +188,9 @@ def main():
                 imgs, targets, _, _ = next(dataiterator)  # load a batch
             imgs = Variable(imgs.type(dtype))
             targets = Variable(targets.type(dtype), requires_grad=False)
+            # 在训练阶段，model返回整体损失
             loss = model(imgs, targets)
+            # 梯度计算
             loss.backward()
 
         # 训练完batch_size * subdivision后执行梯度更新
@@ -207,6 +212,7 @@ def main():
                 tblogger.add_scalar('train/total_loss', model.loss_dict['l2'], iter_i)
 
             # random resizing
+            # 每隔10次训练都重新指定输入图像的大小，
             if random_resize:
                 imgsize = (random.randint(0, 9) % 10 + 10) * 32
                 dataset.img_shape = (imgsize, imgsize)
