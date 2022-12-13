@@ -136,17 +136,25 @@ class YOLOLayer(nn.Module):
             # return pred.view(batchsize, -1, n_ch).data
             return pred.reshape(batchsize, -1, n_ch).data
 
+        # 训练阶段，计算损失
+        #
+        # 获取预测框的xywh
         pred = pred[..., :4].data
 
         # target assignment
 
+        # [B, n_anchors, F_H, F_W, 4+n_classes]
         tgt_mask = torch.zeros(batchsize, self.n_anchors,
                                fsize, fsize, 4 + self.n_classes).type(dtype)
+        # [B, n_anchors, F_H, F_W]
         obj_mask = torch.ones(batchsize, self.n_anchors,
                               fsize, fsize).type(dtype)
+        # [B, n_anchors, F_H, F_W, 2]
         tgt_scale = torch.zeros(batchsize, self.n_anchors,
                                 fsize, fsize, 2).type(dtype)
 
+        # [B, n_anchors, F_H, F_W, n_ch]
+        # n_ch = 4(xywh) + 1(conf) + n_classes
         target = torch.zeros(batchsize, self.n_anchors,
                              fsize, fsize, n_ch).type(dtype)
 
@@ -182,7 +190,7 @@ class YOLOLayer(nn.Module):
 
             pred_ious = bboxes_iou(
                 pred[b].reshape(-1, 4), truth_box, xyxy=False)
-                # pred[b].view(-1, 4), truth_box, xyxy=False)
+            # pred[b].view(-1, 4), truth_box, xyxy=False)
             pred_best_iou, _ = pred_ious.max(dim=1)
             pred_best_iou = (pred_best_iou > self.ignore_thre)
             pred_best_iou = pred_best_iou.view(pred[b].shape[:3])
@@ -224,8 +232,7 @@ class YOLOLayer(nn.Module):
         target[..., np.r_[0:4, 5:n_ch]] *= tgt_mask
         target[..., 2:4] *= tgt_scale
 
-        bceloss = nn.BCELoss(weight=tgt_scale * tgt_scale,
-                             size_average=False)  # weighted BCEloss
+        bceloss = nn.BCELoss(weight=tgt_scale * tgt_scale, size_average=False)  # weighted BCEloss
         loss_xy = bceloss(output[..., :2], target[..., :2])
         loss_wh = self.l2_loss(output[..., 2:4], target[..., 2:4]) / 2
         loss_obj = self.bce_loss(output[..., 4], target[..., 4])
