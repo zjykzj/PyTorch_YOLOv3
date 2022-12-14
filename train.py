@@ -18,21 +18,29 @@ import torch.optim as optim
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    # 模型配置以及训练配置
     parser.add_argument('--cfg', type=str, default='config/yolov3_default.cfg',
                         help='config file. see readme')
+    # 权重路径
     parser.add_argument('--weights_path', type=str,
                         default=None, help='darknet weights file')
+    # 数据加载线程数
     parser.add_argument('--n_cpu', type=int, default=0,
                         help='number of workers')
+    # 间隔多少次训练保存权重
     parser.add_argument('--checkpoint_interval', type=int,
                         default=1000, help='interval between saving checkpoints')
+    # 间隔多少次进行评估
     parser.add_argument('--eval_interval', type=int,
                         default=4000, help='interval between evaluations')
+    # ???
     parser.add_argument('--checkpoint', type=str,
                         help='pytorch checkpoint file path')
+    # 权重保存根路径
     parser.add_argument('--checkpoint_dir', type=str,
                         default='checkpoints',
                         help='directory where checkpoint files are saved')
+    # 是否使用GPU（注意：本仓库仅实现了单GPU训练）
     parser.add_argument('--use_cuda', type=bool, default=True)
     parser.add_argument('--debug', action='store_true', default=False,
                         help='debug mode where only one image is trained')
@@ -101,10 +109,13 @@ def main():
     # Initiate model
     model = YOLOv3(cfg['MODEL'], ignore_thre=ignore_thre)
 
+    # 预训练权重加载，共两种方式
     if args.weights_path:
+        # 方式一：Darknet格式权重文件
         print("loading darknet weights....", args.weights_path)
         parse_yolo_weights(model, args.weights_path)
     elif args.checkpoint:
+        # 方式二：Pytorch格式权重文件
         print("loading pytorch ckpt...", args.checkpoint)
         state = torch.load(args.checkpoint)
         if 'model_state_dict' in state.keys():
@@ -113,6 +124,7 @@ def main():
             model.load_state_dict(state)
 
     if cuda:
+        # GPU训练
         print("using cuda")
         model = model.cuda()
 
@@ -125,22 +137,32 @@ def main():
     model.train()
 
     imgsize = cfg['TRAIN']['IMGSIZE']
-    dataset = COCODataset(model_type=cfg['MODEL']['TYPE'],
-                          data_dir='COCO/',
-                          img_size=imgsize,
-                          augmentation=cfg['AUGMENTATION'],
-                          debug=args.debug)
+    # COCO数据集
+    dataset = COCODataset(
+        # 模型类型，针对YOLO，会转换label格式
+        model_type=cfg['MODEL']['TYPE'],
+        # 数据集根路径，加载标注文件以及图像文件
+        data_dir='COCO/',
+        # 输入图像大小
+        img_size=imgsize,
+        # 数据增强
+        augmentation=cfg['AUGMENTATION'],
+        debug=args.debug
+    )
 
+    # 数据加载器，每次加载batch_size个图像数据以及对应标签
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True, num_workers=args.n_cpu)
     dataiterator = iter(dataloader)
 
+    # COCO评估器
     evaluator = COCOAPIEvaluator(model_type=cfg['MODEL']['TYPE'],
                                  data_dir='COCO/',
                                  img_size=cfg['TEST']['IMGSIZE'],
                                  confthre=cfg['TEST']['CONFTHRE'],
                                  nmsthre=cfg['TEST']['NMSTHRE'])
 
+    # 指定输入模型数据的类型
     dtype = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
     # optimizer setup
@@ -156,21 +178,26 @@ def main():
     optimizer = optim.SGD(params, lr=base_lr, momentum=momentum,
                           dampening=0, weight_decay=decay * batch_size * subdivision)
 
+    # 初始化迭代次数
     iter_state = 0
 
+    # Resume
     if args.checkpoint:
         if 'optimizer_state_dict' in state.keys():
             optimizer.load_state_dict(state['optimizer_state_dict'])
             iter_state = state['iter'] + 1
 
+    # 学习率调度器
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, burnin_schedule)
 
     # start training loop
-    # 开始训练
+    # 训练，共执行iter_size次（50w）
     for iter_i in range(iter_state, iter_size + 1):
+        # 下面的model均保持cuda类型（如果使用GPU训练的话）
 
         # COCO evaluation
         if iter_i % args.eval_interval == 0 and iter_i > 0:
+            # 每隔eval_interval进行评估
             ap50_95, ap50 = evaluator.evaluate(model)
             model.train()
             if args.tfboard:
@@ -178,7 +205,8 @@ def main():
                 tblogger.add_scalar('val/COCOAP50_95', ap50_95, iter_i)
 
         # subdivision loop
-        # 子批次循环
+        # 子批次循环，进行梯度累加
+        # 也就是说每次迭代（iter_i）的总批量大小为batch_size * subdivision
         optimizer.zero_grad()
         for inner_iter_i in range(subdivision):
             try:
@@ -186,6 +214,7 @@ def main():
             except StopIteration:
                 dataiterator = iter(dataloader)
                 imgs, targets, _, _ = next(dataiterator)  # load a batch
+            # 转换到指定数据格式dtype
             imgs = Variable(imgs.type(dtype))
             targets = Variable(targets.type(dtype), requires_grad=False)
             # 在训练阶段，model返回整体损失
@@ -199,7 +228,9 @@ def main():
 
         if iter_i % 10 == 0:
             # logging
+            # 计算当前学习率
             current_lr = scheduler.get_lr()[0] * batch_size * subdivision
+            # 打印当前迭代次数／总迭代次数／当前学习率／各个子损失／当前指定图像大小
             print('[Iter %d/%d] [lr %f] '
                   '[Losses: xy %f, wh %f, conf %f, cls %f, total %f, imgsize %d]'
                   % (iter_i, iter_size, current_lr,
@@ -212,11 +243,13 @@ def main():
                 tblogger.add_scalar('train/total_loss', model.loss_dict['l2'], iter_i)
 
             # random resizing
-            # 每隔10次训练都重新指定输入图像的大小，
+            # 如果设置了随机缩放，那么每隔10次训练后重新指定输入图像大小
             if random_resize:
                 imgsize = (random.randint(0, 9) % 10 + 10) * 32
                 dataset.img_shape = (imgsize, imgsize)
                 dataset.img_size = imgsize
+                # 重新设置数据加载器，因为是打乱模式，可以保证提取数据不会保持一致
+                # 因为手动递增迭代次数，所以不需要依赖数据加载器进行计数
                 dataloader = torch.utils.data.DataLoader(
                     dataset, batch_size=batch_size, shuffle=True, num_workers=args.n_cpu)
                 dataiterator = iter(dataloader)
