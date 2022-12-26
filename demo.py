@@ -9,6 +9,17 @@ from models.yolov3 import *
 from utils.utils import *
 from utils.parse_yolo_weights import parse_yolo_weights
 
+"""
+操作流程：
+
+1. 解析命令行参数 + 配置文件
+2. 创建模型，加载预训练权重
+3. 读取图像，预处理（图像通道转换 + 图像缩放 + 数据归一化 + 维度转换 + 数据格式转换）
+4. 模型推理 + 数据后处理（置信度阈值过滤 + NMS阈值过滤）
+5. 预测框坐标转换
+6. 预测框绘制
+"""
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
