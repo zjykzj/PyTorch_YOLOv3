@@ -261,10 +261,14 @@ def yolobox2label(box, info_img):
         label (list): box data with the format of [y1, x1, y2, x2]
             in the coordinate system of the input image.
     """
+    # 原始高，原始宽，缩放后高，缩放后宽，ROI区域左上角x0，ROI区域左上角y0
     h, w, nh, nw, dx, dy = info_img
+    # 原始边界框的左上角和右下角坐标
     y1, x1, y2, x2 = box
+    # 等比例缩放边界框的宽／高
     box_h = ((y2 - y1) / nh) * h
     box_w = ((x2 - x1) / nw) * w
+    # 基于ROI基底调整边界框左上角坐标，同时进行缩放
     y1 = ((y1 - dy) / nh) * h
     x1 = ((x1 - dx) / nw) * w
     label = [y1, x1, y1 + box_h, x1 + box_w]

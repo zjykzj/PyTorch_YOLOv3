@@ -50,7 +50,9 @@ def main():
     img = cv2.imread(args.image)
     # [H, W, C] -> [C, H, W]　同时　BGR -> RGB
     img_raw = img.copy()[:, :, ::-1].transpose((2, 0, 1))
-    img, info_img = preprocess(img, imgsize, jitter=0)  # info = (h, w, nh, nw, dx, dy)
+    # info = (h, w, nh, nw, dx, dy)
+    #        (原始高，原始宽，缩放后高，缩放后宽，ROI区域左上角x0，ROI区域左上角y0)
+    img, info_img = preprocess(img, imgsize, jitter=0)
     # 图像归一化 + 通道转换（[H, W, C] -> [C, H, W]）
     img = np.transpose(img / 255., (2, 0, 1))
     # [C, H, W] -> [1, C, H, W]
@@ -81,7 +83,8 @@ def main():
     with torch.no_grad():
         # img: [1, 3, 416, 416]
         outputs = model(img)
-        # outputs: [B, N_bbox, 4(xywh)+1(conf)+num_classes]
+        # outputs: [B, N_bbox, 4(xywh) + 1(conf) + num_classes]
+        #          [多少张图片，多少个预测边界框，坐标（xywh）+置信度（conf）+分类概率]
         outputs = postprocess(outputs, 80, confthre, nmsthre)
 
     if outputs[0] is None:
@@ -104,6 +107,7 @@ def main():
         print(int(x1), int(y1), int(x2), int(y2), float(conf), int(cls_pred))
         print('\t+ Label: %s, Conf: %.5f' %
               (coco_class_names[cls_id], cls_conf.item()))
+        # box: [y1, x1, y2, x2]
         box = yolobox2label([y1, x1, y2, x2], info_img)
         bboxes.append(box)
         classes.append(cls_id)
