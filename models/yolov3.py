@@ -256,6 +256,21 @@ class YOLOv3(nn.Module):
         else:
             raise Exception('Model name {} is not available'.format(config_model['TYPE']))
 
+    #     self._init()
+    #
+    # def _init(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Conv2d):
+    #             # nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+    #             # nn.init.normal_(m.weight, 0, 0.01)
+    #             nn.init.constant_(m.weight, 0.01)
+    #             if m.bias is not None:
+    #                 nn.init.constant_(m.bias, 0)
+    #         elif isinstance(m, nn.BatchNorm2d):
+    #             # nn.init.normal_(m.weight, 0, 0.01)
+    #             nn.init.constant_(m.weight, 0.01)
+    #             nn.init.constant_(m.bias, 0)
+
     def forward(self, x, targets=None):
         """
         Forward path of YOLOv3.
@@ -289,6 +304,8 @@ class YOLOv3(nn.Module):
                 x = module(x)
 
             # route layers
+            # 6 第3个stage输出
+            # 8 第4个stage输出
             if i in [6, 8, 12, 20]:
                 route_layers.append(x)
             if i == 14:

@@ -214,6 +214,7 @@ def main():
         # COCO evaluation
         if iter_i % args.eval_interval == 0 and iter_i > 0:
             # 每隔eval_interval进行评估
+            print("Begin evaluating ...")
             ap50_95, ap50 = evaluator.evaluate(model)
             model.train()
             if args.tfboard:
