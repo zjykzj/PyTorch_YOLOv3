@@ -121,6 +121,8 @@ class COCODataset(Dataset):
                 labels[-1].append(self.class_ids.index(anno['category_id']))
                 labels[-1].extend(anno['bbox'])
 
+        # [N_labels, 5]
+        # 5 = cate_id + xywh
         padded_labels = np.zeros((self.max_labels, 5))
         if len(labels) > 0:
             labels = np.stack(labels)
