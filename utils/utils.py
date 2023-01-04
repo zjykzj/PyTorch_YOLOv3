@@ -185,27 +185,60 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
 
     from: https://github.com/chainer/chainercv
     """
+    # bboxes_a: [N_a, 4]
+    # bboxes_b: [N_b, 4]
     if bboxes_a.shape[1] != 4 or bboxes_b.shape[1] != 4:
         raise IndexError
 
     # top left
     if xyxy:
+        # xyxy: x_top_left, y_top_left, x_bottom_right, y_bottom_right
+        # 计算交集矩形的左上角坐标
+        # torch.max([N_a, 1, 2], [N_b, 2]) -> [N_a, N_b, 2]
+        # torch.max: 双重循环
+        #   第一重循环 for i in range(N_a)，遍历boxes_a, 获取边界框i，大小为[2]
+        #       第二重循环　for j in range(N_b)，遍历bboxes_b，获取边界框j，大小为[2]
+        #           分别比较i[0]/j[0]和i[1]/j[1]，获取得到最大的x/y
+        #   遍历完成后，获取得到[N_a, N_b, 2]
         tl = torch.max(bboxes_a[:, None, :2], bboxes_b[:, :2])
         # bottom right
+        # 计算交集矩形的右下角坐标
+        # torch.min([N_a, 1, 2], [N_b, 2]) -> [N_a, N_b, 2]
         br = torch.min(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
+        # 计算bboxes_a的面积
+        # x_bottom_right/y_bottom_right - x_top_left/y_top_left = w/h
+        # prod([N, w/h], 1) = [N], 每个item表示边界框的面积w*h
         area_a = torch.prod(bboxes_a[:, 2:] - bboxes_a[:, :2], 1)
         area_b = torch.prod(bboxes_b[:, 2:] - bboxes_b[:, :2], 1)
     else:
+        # x_center/y_center -> x_top_left, y_top_left
         tl = torch.max((bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
                        (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2))
         # bottom right
+        # x_center/y_center -> x_bottom_right/y_bottom_right
         br = torch.min((bboxes_a[:, None, :2] + bboxes_a[:, None, 2:] / 2),
                        (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2))
 
+        # prod([N_a, w/h], 1) = [N_a], 每个item表示边界框的面积w*h
         area_a = torch.prod(bboxes_a[:, 2:], 1)
         area_b = torch.prod(bboxes_b[:, 2:], 1)
+    # 判断符合条件的结果：x_top_left/y_top_left < x_bottom_right/y_bottom_right
+    # [N_a, N_b, 2] < [N_a, N_b, 2] = [N_a, N_b, 2]
+    # prod([N_a, N_b, 2], 2) = [N_a, N_b], 数值为1/0
     en = (tl < br).type(tl.type()).prod(dim=2)
+    # 首先计算交集w/h: [N_a, N_b, 2] - [N_a, N_b, 2] = [N_a, N_b, 2]
+    # 然后计算交集面积：prod([N_a, N_b, 2], 2) = [N_a, N_b]
+    # 然后去除不符合条件的交集面积
+    # [N_a, N_b] * [N_a, N_b](数值为1/0) = [N_a, N_b]
+    # 大小为[N_a, N_b]，表示bboxes_a的每个边界框与bboxes_b的每个边界框之间的IoU
     area_i = torch.prod(br - tl, 2) * en  # * ((tl < br).all())
+
+    # 计算IoU
+    # 首先计算所有面积
+    # area_a[:, None] + area_b - area_i =
+    # [N_a, 1] + [N_b] - [N_a, N_b] = [N_a, N_b]
+    # 然后交集面积除以所有面积，计算IoU
+    # [N_a, N_b] / [N_a, N_b] = [N_a, N_b]
     return area_i / (area_a[:, None] + area_b - area_i)
 
 
