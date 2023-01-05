@@ -266,13 +266,26 @@ def label2yolobox(labels, info_img, maxsize, lrflip):
                 xc, yc (float) : center of bbox whose values range from 0 to 1.
                 w, h (float) : size of bbox whose values range from 0 to 1.
     """
+    # h/w: 原始图像高/宽
+    # nh/nw: 缩放图像高/宽（未填充）
+    # dx/dy: 填充大小
     h, w, nh, nw, dx, dy = info_img
+    # x1/y1/b_w/b_h -> x1/y1/x2/y2
+    # 设置成和原始图像大小的比率
     x1 = labels[:, 1] / w
     y1 = labels[:, 2] / h
     x2 = (labels[:, 1] + labels[:, 3]) / w
     y2 = (labels[:, 2] + labels[:, 4]) / h
+
+    # (x1 + x2)/2得到x_center
+    # x_center*nw得到缩放后的坐标
+    # xc*nw + dx得到填充后的坐标
+    # 最后除以目标大小得到对应比率
     labels[:, 1] = (((x1 + x2) / 2) * nw + dx) / maxsize
     labels[:, 2] = (((y1 + y2) / 2) * nh + dy) / maxsize
+    # 对于坐标框的宽/高而言，没有填充值，所以计算其对应结果图像的宽/高比率为
+    # b_w / src_w * resized_w / dst_w
+    # b_h / src_h * resized_h / dst_h
     labels[:, 3] *= nw / w / maxsize
     labels[:, 4] *= nh / h / maxsize
     if lrflip:
