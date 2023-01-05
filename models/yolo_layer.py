@@ -24,13 +24,13 @@ class YOLOLayer(nn.Module):
         """
 
         super(YOLOLayer, self).__init__()
-        # 特征图相对于
+        # 缩放倍数
         # [3]
         strides = [32, 16, 8]  # fixed
         # 预设的锚点框列表，保存了所有的锚点框长宽
         # [9, 2]
         self.anchors = config_model['ANCHORS']
-        # 指定不同YOLO层使用的锚点框
+        # 当前YOLO层特征使用的锚点框下标，比如[0, 1, 2]、[3, 4, 5]、[6, 7, 8]
         # [3, 3] -> [3]
         self.anch_mask = config_model['ANCH_MASK'][layer_no]
         # 某一个YOLO层使用的锚点框个数，默认为3
@@ -38,11 +38,13 @@ class YOLOLayer(nn.Module):
         # 数据集类别数
         # COCO: 80
         self.n_classes = config_model['N_CLASSES']
-        # 阈值
+        # 阈值，超过阈值判定为正样本?
         self.ignore_thre = ignore_thre
+
         # 损失函数，work for ???
         self.l2_loss = nn.MSELoss(size_average=False)
         self.bce_loss = nn.BCELoss(size_average=False)
+
         # 第N个YOLO层使用的步长，也就是输入图像大小和使用的特征数据之间的缩放比率
         self.stride = strides[layer_no]
         # 按比例缩放锚点框长／宽
@@ -52,6 +54,7 @@ class YOLOLayer(nn.Module):
         # [3, 2]
         self.masked_anchors = [self.all_anchors_grid[i] for i in self.anch_mask]
         # [9, 4]
+        # ref_anchors用于正负样本判断
         self.ref_anchors = np.zeros((len(self.all_anchors_grid), 4))
         # 赋值，锚点框宽／高
         self.ref_anchors[:, 2:] = np.array(self.all_anchors_grid)
@@ -101,14 +104,17 @@ class YOLOLayer(nn.Module):
         output = output.permute(0, 1, 3, 4, 2)  # .contiguous()
 
         # logistic activation for xy, obj, cls
-        # 针对预测坐标(xy)和预测分类结果执行sigmoid运算，将数值归一化到(0, 1)之间
+        # 针对预测坐标(xc/yc)和预测分类结果(classes)执行sigmoid运算，将数值归一化到(0, 1)之间
+        # 也就是计算预测坐标（xc/yc）相对于网格的距离 + 该预测框类别的分类概率
         output[..., np.r_[:2, 4:n_ch]] = torch.sigmoid(output[..., np.r_[:2, 4:n_ch]])
 
         # calculate pred - xywh obj cls
-        # 网格坐标
-        # [0, 1, 2, ..., F_W - 1] -> [B, n_anchors, F_H, F_W]
+        # 计算网格坐标
+        # [F_W] -> [B, n_anchors, F_H, F_W]
+        # grid_x0 = [0, 1, 2, ..., F_W-1]
         x_shift = dtype(np.broadcast_to(np.arange(fsize, dtype=np.float32), output.shape[:4]))
-        # [0, 1, 2, ..., F_H - 1] -> [F_H, 1] -> [B, n_anchors, F_H, F_W]
+        # [F_H] -> [F_H, 1] -> [B, n_anchors, F_H, F_W]
+        # grid_y0 = [0, 1, 2, ..., F_H-1]
         y_shift = dtype(np.broadcast_to(np.arange(fsize, dtype=np.float32).reshape(fsize, 1), output.shape[:4]))
 
         # [n_anchors, 2]
