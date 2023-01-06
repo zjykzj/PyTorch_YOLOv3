@@ -111,6 +111,7 @@ def main():
 
     # Learning rate setup
     def burnin_schedule(i):
+        # 前1000轮迭代执行warmup
         if i < burn_in:
             # 在warmup阶段，使用线性学习率进行递增
             factor = pow(i / burn_in, 4)
