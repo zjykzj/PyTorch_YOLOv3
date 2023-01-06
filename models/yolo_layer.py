@@ -21,6 +21,7 @@ class YOLOLayer(nn.Module):
             layer_no (int): YOLO layer number - one from (0, 1, 2).
             in_ch (int): number of input channels.
             ignore_thre (float): threshold of IoU above which objectness training is ignored.
+            ？？？　针对损失函数的计算
         """
 
         super(YOLOLayer, self).__init__()
@@ -64,6 +65,19 @@ class YOLOLayer(nn.Module):
                               out_channels=self.n_anchors * (self.n_classes + 5),
                               kernel_size=1, stride=1, padding=0)
 
+        """
+        当前存在几种边界框：
+        1. 锚点框：9个
+        2. 当前特征层使用的锚点框：3个
+        3. 预测框：每幅图像有N_P多个预测框
+        4. 真值标签框：每幅图像有0个到N_T个不等
+        
+        损失函数的关键：
+        
+        1. 如何创建正样本和负样本
+        2. 如何计算损失
+        """
+
     def forward(self, xin, labels=None):
         """
         In this
@@ -85,6 +99,12 @@ class YOLOLayer(nn.Module):
             loss_obj (torch.Tensor): objectness loss - calculated by BCE.
             loss_cls (torch.Tensor): classification loss - calculated by BCE for each class.
             loss_l2 (torch.Tensor): total l2 loss - only for logging.
+            定义了5种损失函数：
+            loss_xy：使用二元交叉熵损失，计算预测框和对应真值边界框在指定网格中的x/y
+            loss_wh：使用L2范数损失（最小平方误差（LSE）），计算预测框宽／高
+            loss_obj: 目标置信度损失，使用二元交叉熵损失
+            loss_cls: 分类损失，每个类别采用二元交叉熵损失
+            loss_l2: 整体L2范数损失，用于记录目的
         """
         output = self.conv(xin)
 
